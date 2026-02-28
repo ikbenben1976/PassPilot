@@ -31,7 +31,7 @@ console.log('[DB] Schema initialized');
 const app = express();
 
 // CORS
-const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
+const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000,http://localhost:5173')
   .split(',')
   .map((o) => o.trim());
 app.use(cors({ origin: corsOrigins, credentials: true }));
@@ -96,10 +96,12 @@ app.use('/api/subscription', requireAuth, subscriptionRoutes);
 // Notifications (requires auth only)
 app.use('/api/notifications', requireAuth, notificationRoutes);
 
-// ─── Subscriber-Only Routes ──────────────────────────────────────────────────
+// ─── Flight Routes (public with optional auth) ─────────────────────────────
 
-// Flight search, calendar, destinations (requires auth + active subscription)
-app.use('/api/flights', requireAuth, requireSubscription, rateLimit(60, 60_000), flightRoutes);
+// Flight search, calendar, destinations — public so users can search without signing up
+app.use('/api/flights', optionalAuth, rateLimit(60, 60_000), flightRoutes);
+
+// ─── Subscriber-Only Routes ──────────────────────────────────────────────────
 
 // Saved searches (requires auth + active subscription)
 app.use('/api/saved-searches', requireAuth, requireSubscription, savedSearchRoutes);

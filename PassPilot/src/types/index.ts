@@ -68,8 +68,8 @@ export interface Destination {
   avgPrice: number;
   lowestPrice: number;
   nextAvailable: string | null; // ISO date
-  popular: boolean;
-  tags: string[]; // "beach", "mountains", "city", etc.
+  popular?: boolean;
+  tags?: string[]; // "beach", "mountains", "city", etc.
   imageUrl?: string;
 }
 

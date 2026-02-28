@@ -2,9 +2,11 @@
  * API Service Layer
  *
  * Centralized API client for PassPilot.
- * In production, this would connect to the backend API.
- * Currently configured with mock data for architecture demonstration.
+ * Connects to the backend API with Vite proxy forwarding /api to the Express server.
+ * Falls back gracefully when the backend is unavailable.
  */
+
+import type { Flight, DayAvailability, Destination } from '@/types';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
@@ -68,20 +70,20 @@ class ApiClient {
   // ─── Flights ─────────────────────────────────────────────────────────
 
   flights = {
-    search: (params: Record<string, unknown>, token: string) =>
-      this.request<{ flights: unknown[]; total: number }>('/flights/search', {
+    search: (params: Record<string, unknown>, token?: string) =>
+      this.request<{ flights: Flight[]; total: number; cached: boolean; searchedAt: string }>('/flights/search', {
         method: 'POST',
         body: params,
         token,
       }),
 
-    calendar: (origin: string, month: string, token: string) =>
-      this.request<{ days: unknown[] }>(`/flights/calendar?origin=${origin}&month=${month}`, {
+    calendar: (origin: string, month: string, token?: string) =>
+      this.request<{ days: DayAvailability[] }>(`/flights/calendar?origin=${origin}&month=${month}`, {
         token,
       }),
 
-    destinations: (origin: string, token: string) =>
-      this.request<{ destinations: unknown[] }>(`/flights/destinations?origin=${origin}`, {
+    destinations: (origin: string, token?: string) =>
+      this.request<{ destinations: Destination[] }>(`/flights/destinations?origin=${origin}`, {
         token,
       }),
   };

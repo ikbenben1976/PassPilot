@@ -1,15 +1,17 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Search,
   Calendar,
   Map as MapIcon,
   List,
   Plane,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Tabs } from '@/components/ui/Tabs';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { AirportPicker } from '@/components/search/AirportPicker';
 import { FlightCard } from '@/components/search/FlightCard';
 import { CalendarHeatMap } from '@/components/search/CalendarHeatMap';
@@ -17,32 +19,13 @@ import { SearchFilters } from '@/components/search/SearchFilters';
 import { DestinationMap } from '@/components/search/DestinationMap';
 import { useSearchStore } from '@/stores/searchStore';
 import { formatPriceCompact } from '@/lib/format';
-import { MOCK_FLIGHTS, MOCK_CALENDAR, MOCK_DESTINATIONS } from '@/lib/mockData';
-import type { Flight, FlightSearchParams } from '@/types';
+import type { Flight } from '@/types';
 
 const VIEW_TABS = [
   { id: 'list', label: 'List', icon: <List className="w-4 h-4" /> },
   { id: 'calendar', label: 'Calendar', icon: <Calendar className="w-4 h-4" /> },
   { id: 'map', label: 'Map', icon: <MapIcon className="w-4 h-4" /> },
 ];
-
-function filterFlights(allFlights: Flight[], params: FlightSearchParams): Flight[] {
-  return allFlights.filter((flight) => {
-    // Filter by origin
-    if (params.origin && flight.origin.code !== params.origin) return false;
-    // Filter by destination (if specified)
-    if (params.destination && flight.destination.code !== params.destination) return false;
-    // Filter by departure date
-    if (params.departureDate && !flight.departureTime.startsWith(params.departureDate)) return false;
-    // Filter by GoWild/Pass availability
-    if (params.goWildOnly && !flight.goWildAvailable) return false;
-    // Filter by nonstop
-    if (params.nonstopOnly && flight.stops > 0) return false;
-    // Filter by max price
-    if (params.maxPrice && flight.price > params.maxPrice) return false;
-    return true;
-  });
-}
 
 function sortFlights(flights: Flight[], sortBy: string, sortOrder: string): Flight[] {
   const sorted = [...flights];
@@ -70,51 +53,81 @@ function sortFlights(flights: Flight[], sortBy: string, sortOrder: string): Flig
 }
 
 export function SearchPage() {
-  const { params, setParams } = useSearchStore();
+  const {
+    params,
+    setParams,
+    results,
+    calendar,
+    destinations,
+    isSearching,
+    isLoadingCalendar,
+    isLoadingDestinations,
+    totalResults,
+    lastSearched,
+    usingMockData,
+    searchFlights,
+    fetchCalendar,
+    fetchDestinations,
+  } = useSearchStore();
+
   const [view, setView] = useState('list');
   const [calMonth, setCalMonth] = useState({ year: 2026, month: 1 }); // Feb 2026
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedMapDest, setSelectedMapDest] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
 
-  // In production these would come from API; using mock data for architecture
-  const calendarDays = MOCK_CALENDAR;
-  const destinations = MOCK_DESTINATIONS;
-
-  // Filter and sort flights based on search params
+  // Sort results client-side (backend already filters, but sort can change without re-fetching)
   const flights = useMemo(() => {
-    const filtered = filterFlights(MOCK_FLIGHTS, params);
-    return sortFlights(filtered, params.sortBy, params.sortOrder);
-  }, [params]);
+    return sortFlights(results, params.sortBy, params.sortOrder);
+  }, [results, params.sortBy, params.sortOrder]);
 
-  // Flights filtered for a specific calendar date
-  const calendarFlights = useMemo(() => {
-    if (!selectedDate) return [];
-    return MOCK_FLIGHTS.filter((f) => {
-      if (params.origin && f.origin.code !== params.origin) return false;
-      if (params.goWildOnly && !f.goWildAvailable) return false;
-      if (params.nonstopOnly && f.stops > 0) return false;
-      return f.departureTime.startsWith(selectedDate);
-    });
-  }, [selectedDate, params.origin, params.goWildOnly, params.nonstopOnly]);
-
-  // Flights to the selected map destination
+  // Flights to the selected map destination (from the results we already have)
   const mapDestFlights = useMemo(() => {
     if (!selectedMapDest) return [];
-    return MOCK_FLIGHTS.filter((f) => {
-      if (params.origin && f.origin.code !== params.origin) return false;
-      if (params.goWildOnly && !f.goWildAvailable) return false;
-      return f.destination.code === selectedMapDest;
-    });
-  }, [selectedMapDest, params.origin, params.goWildOnly]);
+    return results.filter((f) => f.destination.code === selectedMapDest);
+  }, [selectedMapDest, results]);
 
   const selectedDestination = destinations.find(
     (d) => d.airport.code === selectedMapDest,
   );
 
-  const handleSearch = () => {
+  const handleSearch = useCallback(async () => {
     setHasSearched(true);
-  };
+    await searchFlights();
+
+    // Also fetch calendar and destinations for the origin
+    if (params.origin) {
+      fetchCalendar(params.origin, calMonth.year, calMonth.month + 1); // API uses 1-indexed months
+      fetchDestinations(params.origin);
+    }
+  }, [searchFlights, fetchCalendar, fetchDestinations, params.origin, calMonth.year, calMonth.month]);
+
+  // Re-fetch when sort/filter params change (after initial search)
+  useEffect(() => {
+    if (hasSearched && lastSearched) {
+      searchFlights();
+    }
+  // Only re-fetch when filter params change, not sort (sort is client-side)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.goWildOnly, params.nonstopOnly, params.maxPrice]);
+
+  // Fetch calendar data when month changes
+  useEffect(() => {
+    if (hasSearched && params.origin) {
+      fetchCalendar(params.origin, calMonth.year, calMonth.month + 1);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calMonth.year, calMonth.month]);
+
+  // When a calendar date is selected, search for flights on that date
+  const calendarFlights = useMemo(() => {
+    if (!selectedDate) return [];
+    return results.filter((f) => f.departureTime.startsWith(selectedDate));
+  }, [selectedDate, results]);
+
+  const timeSinceSearch = lastSearched
+    ? Math.round((Date.now() - new Date(lastSearched).getTime()) / 60000)
+    : null;
 
   return (
     <div className="min-h-screen bg-surface-50">
@@ -158,11 +171,12 @@ export function SearchPage() {
             <Button
               size="lg"
               variant="primary"
-              icon={<Search className="w-5 h-5" />}
+              icon={isSearching ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
               onClick={handleSearch}
+              disabled={isSearching}
               className="w-full lg:w-auto"
             >
-              Search Flights
+              {isSearching ? 'Searching...' : 'Search Flights'}
             </Button>
           </div>
         </div>
@@ -196,12 +210,20 @@ export function SearchPage() {
                 variant="pills"
               />
               <div className="hidden sm:flex items-center gap-2">
-                <Badge variant="success" dot>
-                  Live data
-                </Badge>
-                <span className="text-xs text-surface-500">
-                  Updated 2 min ago
-                </span>
+                {usingMockData ? (
+                  <Badge variant="warning" dot>
+                    Demo data
+                  </Badge>
+                ) : (
+                  <Badge variant="success" dot>
+                    Live data
+                  </Badge>
+                )}
+                {timeSinceSearch !== null && (
+                  <span className="text-xs text-surface-500">
+                    Updated {timeSinceSearch < 1 ? 'just now' : `${timeSinceSearch} min ago`}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -209,14 +231,19 @@ export function SearchPage() {
             <SearchFilters
               params={params}
               onChange={setParams}
-              totalResults={flights.length}
+              totalResults={totalResults}
             />
 
             {/* Results */}
             <div className="mt-6">
               {view === 'list' && (
                 <div className="space-y-3">
-                  {flights.length > 0 ? (
+                  {isSearching ? (
+                    // Loading skeletons
+                    Array.from({ length: 4 }).map((_, i) => (
+                      <Skeleton key={i} className="h-32 rounded-2xl" />
+                    ))
+                  ) : flights.length > 0 ? (
                     flights.map((flight) => (
                       <FlightCard key={flight.id} flight={flight} />
                     ))
@@ -236,29 +263,33 @@ export function SearchPage() {
 
               {view === 'calendar' && (
                 <div className="grid lg:grid-cols-[1fr_380px] gap-6">
-                  <CalendarHeatMap
-                    year={calMonth.year}
-                    month={calMonth.month}
-                    days={calendarDays}
-                    selectedDate={selectedDate}
-                    onSelectDate={setSelectedDate}
-                    onPrevMonth={() =>
-                      setCalMonth((prev) => {
-                        const m = prev.month - 1;
-                        return m < 0
-                          ? { year: prev.year - 1, month: 11 }
-                          : { year: prev.year, month: m };
-                      })
-                    }
-                    onNextMonth={() =>
-                      setCalMonth((prev) => {
-                        const m = prev.month + 1;
-                        return m > 11
-                          ? { year: prev.year + 1, month: 0 }
-                          : { year: prev.year, month: m };
-                      })
-                    }
-                  />
+                  {isLoadingCalendar ? (
+                    <Skeleton className="h-[500px] rounded-2xl" />
+                  ) : (
+                    <CalendarHeatMap
+                      year={calMonth.year}
+                      month={calMonth.month}
+                      days={calendar}
+                      selectedDate={selectedDate}
+                      onSelectDate={setSelectedDate}
+                      onPrevMonth={() =>
+                        setCalMonth((prev) => {
+                          const m = prev.month - 1;
+                          return m < 0
+                            ? { year: prev.year - 1, month: 11 }
+                            : { year: prev.year, month: m };
+                        })
+                      }
+                      onNextMonth={() =>
+                        setCalMonth((prev) => {
+                          const m = prev.month + 1;
+                          return m > 11
+                            ? { year: prev.year + 1, month: 0 }
+                            : { year: prev.year, month: m };
+                        })
+                      }
+                    />
+                  )}
 
                   {/* Sidebar: flights for selected date */}
                   <div className="space-y-3">
@@ -294,11 +325,15 @@ export function SearchPage() {
 
               {view === 'map' && (
                 <div className="grid lg:grid-cols-[1fr_380px] gap-6">
-                  <DestinationMap
-                    destinations={destinations}
-                    selectedCode={selectedMapDest}
-                    onSelect={setSelectedMapDest}
-                  />
+                  {isLoadingDestinations ? (
+                    <Skeleton className="h-[500px] rounded-2xl" />
+                  ) : (
+                    <DestinationMap
+                      destinations={destinations}
+                      selectedCode={selectedMapDest}
+                      onSelect={setSelectedMapDest}
+                    />
+                  )}
 
                   {/* Sidebar: flights to selected destination */}
                   <div className="space-y-3">
@@ -330,7 +365,7 @@ export function SearchPage() {
                               </p>
                             </div>
                           </div>
-                          {selectedDestination.tags.length > 0 && (
+                          {selectedDestination.tags && selectedDestination.tags.length > 0 && (
                             <div className="flex gap-1.5 mt-3">
                               {selectedDestination.tags.map((tag) => (
                                 <Badge key={tag} variant="brand" size="sm">

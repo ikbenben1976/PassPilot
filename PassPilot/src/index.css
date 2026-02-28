@@ -1,0 +1,101 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-brand: 30 58 95;
+    --color-accent: 20 184 166;
+  }
+
+  html {
+    @apply scroll-smooth antialiased;
+  }
+
+  body {
+    @apply bg-surface-0 text-surface-900 font-sans;
+  }
+
+  ::selection {
+    @apply bg-brand-200 text-brand-900;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/70 backdrop-blur-xl border border-white/20 shadow-soft;
+  }
+
+  .glass-dark {
+    @apply bg-surface-900/70 backdrop-blur-xl border border-white/10 shadow-soft;
+  }
+
+  .gradient-text {
+    @apply bg-gradient-to-r from-brand-500 to-brand-700 bg-clip-text text-transparent;
+  }
+
+  .gradient-text-accent {
+    @apply bg-gradient-to-r from-accent-400 to-accent-600 bg-clip-text text-transparent;
+  }
+
+  .container-narrow {
+    @apply max-w-5xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+
+  .container-wide {
+    @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+
+  .container-full {
+    @apply max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8;
+  }
+
+  /* Calendar heat map cell colors */
+  .cal-empty {
+    @apply bg-surface-100;
+  }
+  .cal-low {
+    @apply bg-brand-100;
+  }
+  .cal-med {
+    @apply bg-brand-300;
+  }
+  .cal-high {
+    @apply bg-brand-500;
+  }
+  .cal-max {
+    @apply bg-brand-700;
+  }
+
+  /* Price tag styling */
+  .price-low {
+    @apply text-emerald-600 bg-emerald-50;
+  }
+  .price-mid {
+    @apply text-amber-600 bg-amber-50;
+  }
+  .price-high {
+    @apply text-red-600 bg-red-50;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .animate-delay-100 {
+    animation-delay: 100ms;
+  }
+  .animate-delay-200 {
+    animation-delay: 200ms;
+  }
+  .animate-delay-300 {
+    animation-delay: 300ms;
+  }
+  .animate-delay-500 {
+    animation-delay: 500ms;
+  }
+}

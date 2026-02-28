@@ -157,65 +157,6 @@ function HeroSection() {
           </div>
         </div>
 
-        {/* Hero visual - Floating search card mockup */}
-        <div className="hidden lg:block absolute right-8 top-1/2 -translate-y-1/2 w-[420px]">
-          <div className="relative">
-            <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-6 shadow-float animate-fade-in animate-delay-200">
-              {/* Mock search results */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-white/80 text-sm mb-4">
-                  <span className="font-medium">From DEN &mdash; Tomorrow</span>
-                  <Badge variant="success" size="sm">
-                    23 flights
-                  </Badge>
-                </div>
-                {[
-                  { dest: 'Austin, TX', code: 'AUS', price: '$15', time: '6:05 AM' },
-                  { dest: 'Miami, FL', code: 'MIA', price: '$29', time: '7:30 AM' },
-                  { dest: 'Phoenix, AZ', code: 'PHX', price: '$12', time: '9:15 AM' },
-                  { dest: 'Las Vegas, NV', code: 'LAS', price: '$18', time: '11:00 AM' },
-                ].map((flight) => (
-                  <div
-                    key={flight.code}
-                    className="flex items-center justify-between px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-brand-500/20 flex items-center justify-center">
-                        <Compass className="w-4 h-4 text-brand-300" />
-                      </div>
-                      <div>
-                        <p className="text-white text-sm font-medium">
-                          {flight.dest}
-                        </p>
-                        <p className="text-white/50 text-xs">{flight.time}</p>
-                      </div>
-                    </div>
-                    <span className="text-accent-400 font-bold text-sm">
-                      {flight.price}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Floating notification */}
-            <div className="absolute -top-4 -right-4 bg-white rounded-2xl px-4 py-3 shadow-float animate-float animate-delay-500">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
-                  <Bell className="w-4 h-4 text-emerald-600" />
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-surface-900">
-                    Price Alert!
-                  </p>
-                  <p className="text-2xs text-surface-500">
-                    DEN→AUS dropped to $12
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Bottom fade */}

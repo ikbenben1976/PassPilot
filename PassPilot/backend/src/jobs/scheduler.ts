@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { refreshFlights } from './refreshFlights.js';
+import { refreshFlights, updateAirportPriorities } from './refreshFlights.js';
 import { checkAlerts } from './checkAlerts.js';
 import { pruneCache } from './pruneCache.js';
 import { flightCache, calendarCache, destCache } from '../lib/cache.js';
@@ -31,6 +31,23 @@ export function startScheduler(): void {
   initialized = true;
 
   console.log('[Scheduler] Starting background jobs...');
+
+  // Seed monitored airports from user home airports on startup
+  try {
+    updateAirportPriorities();
+    console.log('[Scheduler] Airport priorities initialized from user home airports');
+  } catch (err) {
+    console.error('[Scheduler] Failed to initialize airport priorities:', err);
+  }
+
+  // Update airport priorities every 30 minutes (picks up new user registrations)
+  cron.schedule('*/30 * * * *', () => {
+    try {
+      updateAirportPriorities();
+    } catch (err) {
+      console.error('[Scheduler] Failed to update airport priorities:', err);
+    }
+  });
 
   // Refresh flight data every 15 minutes
   cron.schedule('*/15 * * * *', async () => {
@@ -73,7 +90,8 @@ export function startScheduler(): void {
   });
 
   console.log('[Scheduler] Jobs scheduled:');
-  console.log('  - Flight refresh: every 15 min');
-  console.log('  - Alert checker:  every 5 min');
-  console.log('  - Cache pruning:  every hour');
+  console.log('  - Airport priorities: every 30 min');
+  console.log('  - Flight refresh:     every 15 min');
+  console.log('  - Alert checker:      every 5 min');
+  console.log('  - Cache pruning:      every hour');
 }

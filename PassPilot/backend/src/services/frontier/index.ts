@@ -8,6 +8,7 @@ export { FrontierClient } from './client.js';
 export { MockAdapter } from './mockAdapter.js';
 export { FrontierResponseParser } from './parser.js';
 export { FlightPipeline } from './pipeline.js';
+export { randomUserAgent, browserHeaders } from './userAgents.js';
 
 // ─── Singleton Pipeline ──────────────────────────────────────────────────────
 
@@ -30,13 +31,14 @@ export function getPipeline(): FlightPipeline {
       console.log('[Pipeline] Using mock Frontier data adapter (FRONTIER_USE_MOCK=true)');
       adapter = new MockAdapter();
     } else if (envFlag === 'false') {
+      console.log('[Pipeline] Using live Frontier booking client (FRONTIER_USE_MOCK=false)');
       adapter = new FrontierClient(
-        Number(process.env.FRONTIER_REQUEST_INTERVAL_MS) || 1_000,
+        Number(process.env.FRONTIER_REQUEST_INTERVAL_MS) || 1_500,
       );
     } else {
-      // Auto-detect: probe the live API; fall back to mock on failure
+      // Auto-detect: probe the live booking engine; fall back to mock on failure
       const client = new FrontierClient(
-        Number(process.env.FRONTIER_REQUEST_INTERVAL_MS) || 1_000,
+        Number(process.env.FRONTIER_REQUEST_INTERVAL_MS) || 1_500,
       );
       adapter = client;
 

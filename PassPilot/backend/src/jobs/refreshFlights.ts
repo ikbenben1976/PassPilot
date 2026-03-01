@@ -1,5 +1,6 @@
 import db from '../lib/db.js';
 import { getPipeline } from '../services/frontier/index.js';
+import { getAllAirports } from '../lib/airports.js';
 
 interface MonitoredAirport {
   code: string;
@@ -69,8 +70,34 @@ export async function refreshFlights(): Promise<{
 }
 
 /**
+ * Seed all Frontier airports into monitored_airports.
+ * Runs once on startup to ensure every airport is monitored from the start,
+ * regardless of whether any users have registered yet.
+ */
+export function seedAllAirports(): number {
+  const airports = getAllAirports(false);
+
+  const upsert = db.prepare(
+    `INSERT INTO monitored_airports (code, priority, refresh_interval_minutes, active)
+     VALUES (?, 1, 30, 1)
+     ON CONFLICT(code) DO NOTHING`,
+  );
+
+  let inserted = 0;
+  const seed = db.transaction(() => {
+    for (const airport of airports) {
+      const result = upsert.run(airport.code);
+      if (result.changes > 0) inserted++;
+    }
+  });
+
+  seed();
+  return inserted;
+}
+
+/**
  * Update airport monitoring priorities based on member home airports.
- * Called periodically to ensure popular airports are refreshed more often.
+ * Boosts priority and shortens refresh interval for airports where users are concentrated.
  */
 export function updateAirportPriorities(): void {
   // Count how many users have each airport as their home
@@ -83,18 +110,20 @@ export function updateAirportPriorities(): void {
     )
     .all() as { code: string; user_count: number }[];
 
+  if (counts.length === 0) return;
+
   const upsert = db.prepare(
-    `INSERT INTO monitored_airports (code, priority, refresh_interval_minutes, active)
-     VALUES (?, ?, ?, 1)
-     ON CONFLICT(code) DO UPDATE SET priority = excluded.priority, refresh_interval_minutes = excluded.refresh_interval_minutes`,
+    `UPDATE monitored_airports
+     SET priority = ?, refresh_interval_minutes = ?
+     WHERE code = ?`,
   );
 
   const updateMany = db.transaction(() => {
     for (const { code, user_count } of counts) {
       // More users = higher priority, shorter refresh interval
-      const priority = user_count;
+      const priority = 1 + user_count;
       const refreshInterval = user_count >= 10 ? 15 : user_count >= 5 ? 20 : 30;
-      upsert.run(code, priority, refreshInterval);
+      upsert.run(priority, refreshInterval, code);
     }
   });
 

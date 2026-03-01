@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { refreshFlights, updateAirportPriorities } from './refreshFlights.js';
+import { refreshFlights, seedAllAirports, updateAirportPriorities } from './refreshFlights.js';
 import { checkAlerts } from './checkAlerts.js';
 import { pruneCache } from './pruneCache.js';
 import { flightCache, calendarCache, destCache } from '../lib/cache.js';
@@ -32,12 +32,17 @@ export function startScheduler(): void {
 
   console.log('[Scheduler] Starting background jobs...');
 
-  // Seed monitored airports from user home airports on startup
+  // Seed all Frontier airports into monitored_airports on startup
   try {
+    const inserted = seedAllAirports();
+    if (inserted > 0) {
+      console.log(`[Scheduler] Seeded ${inserted} Frontier airports for monitoring`);
+    }
+    // Boost priority for airports where users are concentrated
     updateAirportPriorities();
-    console.log('[Scheduler] Airport priorities initialized from user home airports');
+    console.log('[Scheduler] Airport monitoring initialized');
   } catch (err) {
-    console.error('[Scheduler] Failed to initialize airport priorities:', err);
+    console.error('[Scheduler] Failed to initialize airport monitoring:', err);
   }
 
   // Update airport priorities every 30 minutes (picks up new user registrations)

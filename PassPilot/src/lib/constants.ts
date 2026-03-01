@@ -7,7 +7,7 @@ export const SUBSCRIPTION_PRICE_MONTHLY = 299; // $2.99
 export const SUBSCRIPTION_PRICE_ANNUAL = 1188; // $11.88/yr ($0.99/mo)
 export const PROMO_TRIAL_DURATION_HOURS = 24;
 
-export const FRONTIER_AIRPORTS_COUNT = 100;
+export const FRONTIER_AIRPORTS_COUNT = 73;
 export const MAX_SEARCH_RESULTS = 200;
 
 export const NAV_LINKS = [

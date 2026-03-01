@@ -4,25 +4,14 @@
  * Populates flight_cache and monitored_airports with realistic
  * Frontier GoWild flight data for development and testing.
  *
- * Usage: npm run db:seed (or: tsx src/lib/seed.ts)
+ * Can be run standalone:  npm run db:seed
+ * Or auto-runs at server startup when flight_cache is empty.
  */
 
-import 'dotenv/config';
-import { mkdirSync } from 'fs';
-import { dirname } from 'path';
-import db, { generateId, initSchema } from './db.js';
+import db from './db.js';
 import { AIRPORTS } from './airports.js';
 
-// Ensure data directory exists
-const dbPath = process.env.DATABASE_PATH || './data/passpilot.db';
-mkdirSync(dirname(dbPath), { recursive: true });
-
-// Initialize schema
-initSchema();
-console.log('Schema initialized.');
-
 // ─── Route Definitions ──────────────────────────────────────────────────────
-// origin → [{ destination, durationMin }]
 
 interface Route {
   dest: string;
@@ -93,16 +82,15 @@ const ROUTES: Record<string, Route[]> = {
   ],
 };
 
-// ─── Departure Time Templates ───────────────────────────────────────────────
 // Realistic departure hours (local time approximation)
 const DEPARTURE_HOURS = [6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 19, 20];
 
-// ─── Seeded Random ─────────────────────────────────────────────────────────
-// Simple seeded PRNG for reproducible results
-let seed = 42;
+// ─── Seeded PRNG (reproducible results) ─────────────────────────────────────
+
+let prngSeed = 42;
 function seededRandom(): number {
-  seed = (seed * 16807 + 0) % 2147483647;
-  return (seed - 1) / 2147483646;
+  prngSeed = (prngSeed * 16807 + 0) % 2147483647;
+  return (prngSeed - 1) / 2147483646;
 }
 
 function randomInt(min: number, max: number): number {
@@ -113,7 +101,7 @@ function pick<T>(arr: T[]): T {
   return arr[Math.floor(seededRandom() * arr.length)]!;
 }
 
-// ─── Seed Monitored Airports ────────────────────────────────────────────────
+// ─── Monitored Airports ─────────────────────────────────────────────────────
 
 const MONITORED = [
   { code: 'DEN', priority: 10, interval: 15 },
@@ -133,151 +121,158 @@ const MONITORED = [
   { code: 'SAN', priority: 2, interval: 30 },
 ];
 
-const upsertAirport = db.prepare(`
-  INSERT INTO monitored_airports (code, priority, refresh_interval_minutes, active)
-  VALUES (?, ?, ?, 1)
-  ON CONFLICT(code) DO UPDATE SET
-    priority = excluded.priority,
-    refresh_interval_minutes = excluded.refresh_interval_minutes,
-    active = 1
-`);
+// ─── Main Seed Function ─────────────────────────────────────────────────────
 
-const seedAirports = db.transaction(() => {
-  for (const { code, priority, interval } of MONITORED) {
-    upsertAirport.run(code, priority, interval);
-  }
-});
+export function seedDatabase(): void {
+  // Reset PRNG for reproducibility
+  prngSeed = 42;
 
-seedAirports();
-console.log(`Seeded ${MONITORED.length} monitored airports.`);
+  // Seed monitored airports
+  const upsertAirport = db.prepare(`
+    INSERT INTO monitored_airports (code, priority, refresh_interval_minutes, active)
+    VALUES (?, ?, ?, 1)
+    ON CONFLICT(code) DO UPDATE SET
+      priority = excluded.priority,
+      refresh_interval_minutes = excluded.refresh_interval_minutes,
+      active = 1
+  `);
 
-// ─── Seed Flight Cache ──────────────────────────────────────────────────────
+  const seedAirports = db.transaction(() => {
+    for (const { code, priority, interval } of MONITORED) {
+      upsertAirport.run(code, priority, interval);
+    }
+  });
+  seedAirports();
+  console.log(`[Seed] Seeded ${MONITORED.length} monitored airports.`);
 
-const today = new Date();
-today.setHours(0, 0, 0, 0);
-const DAYS_AHEAD = 14;
+  // Seed flights
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const DAYS_AHEAD = 14;
+  const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60_000).toISOString();
 
-// expires_at: 1 year from now so seed data persists
-const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60_000).toISOString();
+  const upsertFlight = db.prepare(`
+    INSERT INTO flight_cache
+      (id, origin, destination, departure_time, arrival_time, flight_number,
+       price, gowild_available, seats_remaining, duration, stops, status,
+       fetched_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+    ON CONFLICT(id) DO UPDATE SET
+      price = excluded.price,
+      gowild_available = excluded.gowild_available,
+      seats_remaining = excluded.seats_remaining,
+      status = excluded.status,
+      fetched_at = datetime('now'),
+      expires_at = excluded.expires_at
+  `);
 
-const upsertFlight = db.prepare(`
-  INSERT INTO flight_cache
-    (id, origin, destination, departure_time, arrival_time, flight_number,
-     price, gowild_available, seats_remaining, duration, stops, status,
-     fetched_at, expires_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
-  ON CONFLICT(id) DO UPDATE SET
-    price = excluded.price,
-    gowild_available = excluded.gowild_available,
-    seats_remaining = excluded.seats_remaining,
-    status = excluded.status,
-    fetched_at = datetime('now'),
-    expires_at = excluded.expires_at
-`);
+  let flightCount = 0;
 
-let flightCount = 0;
+  const seedFlights = db.transaction(() => {
+    for (const [origin, routes] of Object.entries(ROUTES)) {
+      for (const route of routes) {
+        if (!AIRPORTS[origin] || !AIRPORTS[route.dest]) continue;
 
-const seedFlights = db.transaction(() => {
-  for (const [origin, routes] of Object.entries(ROUTES)) {
-    for (const route of routes) {
-      // Verify both airports exist
-      if (!AIRPORTS[origin] || !AIRPORTS[route.dest]) continue;
+        for (let dayOffset = 0; dayOffset < DAYS_AHEAD; dayOffset++) {
+          const date = new Date(today);
+          date.setDate(date.getDate() + dayOffset);
+          const dateStr = date.toISOString().split('T')[0];
 
-      for (let dayOffset = 0; dayOffset < DAYS_AHEAD; dayOffset++) {
-        const date = new Date(today);
-        date.setDate(date.getDate() + dayOffset);
-        const dateStr = date.toISOString().split('T')[0];
+          const flightsPerDay = randomInt(2, 4);
+          const usedHours = new Set<number>();
 
-        // 2-4 flights per route per day
-        const flightsPerDay = randomInt(2, 4);
-        const usedHours = new Set<number>();
+          for (let f = 0; f < flightsPerDay; f++) {
+            let hour: number;
+            let attempts = 0;
+            do {
+              hour = pick(DEPARTURE_HOURS);
+              attempts++;
+            } while (usedHours.has(hour) && attempts < 20);
+            usedHours.add(hour);
 
-        for (let f = 0; f < flightsPerDay; f++) {
-          // Pick a departure hour that hasn't been used today for this route
-          let hour: number;
-          let attempts = 0;
-          do {
-            hour = pick(DEPARTURE_HOURS);
-            attempts++;
-          } while (usedHours.has(hour) && attempts < 20);
-          usedHours.add(hour);
+            const minute = randomInt(0, 3) * 15;
+            const depTime = `${dateStr}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
 
-          const minute = randomInt(0, 3) * 15; // 0, 15, 30, or 45
-          const depTime = `${dateStr}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
+            const depMs = new Date(depTime).getTime();
+            const arrMs = depMs + route.duration * 60_000;
+            const arrTime = new Date(arrMs).toISOString().replace('.000Z', '').replace('Z', '');
 
-          // Arrival time
-          const depMs = new Date(depTime).getTime();
-          const arrMs = depMs + route.duration * 60_000;
-          const arrTime = new Date(arrMs).toISOString().replace('.000Z', '').replace('Z', '');
+            const flightNum = `F9 ${1000 + (origin.charCodeAt(0) * 100 + route.dest.charCodeAt(0) * 10 + hour) % 9000}`;
+            const price = randomInt(1200, 4900);
+            const isGoWild = seededRandom() < 0.7 ? 1 : 0;
 
-          // Flight number: F9 + 4 digits (deterministic per route+hour)
-          const flightNum = `F9 ${1000 + (origin.charCodeAt(0) * 100 + route.dest.charCodeAt(0) * 10 + hour) % 9000}`;
+            const roll = seededRandom();
+            let seatsRemaining: number | null;
+            let status: string;
+            if (roll < 0.15) {
+              seatsRemaining = 0;
+              status = 'sold_out';
+            } else if (roll < 0.40) {
+              seatsRemaining = randomInt(1, 3);
+              status = 'limited';
+            } else {
+              seatsRemaining = randomInt(4, 15);
+              status = 'available';
+            }
 
-          // Price in cents: GoWild prices $12-$49
-          const price = randomInt(1200, 4900);
+            const stops = seededRandom() < 0.85 ? 0 : 1;
+            const actualDuration = stops === 1 ? route.duration + randomInt(40, 90) : route.duration;
+            const id = `${origin}-${route.dest}-${flightNum.replace(' ', '')}-${depTime}`;
 
-          // GoWild available: ~70%
-          const isGoWild = seededRandom() < 0.7 ? 1 : 0;
+            upsertFlight.run(
+              id, origin, route.dest, depTime, arrTime, flightNum,
+              price, isGoWild, seatsRemaining, actualDuration, stops, status, expiresAt,
+            );
 
-          // Seats remaining and status
-          const roll = seededRandom();
-          let seatsRemaining: number | null;
-          let status: string;
-          if (roll < 0.15) {
-            seatsRemaining = 0;
-            status = 'sold_out';
-          } else if (roll < 0.40) {
-            seatsRemaining = randomInt(1, 3);
-            status = 'limited';
-          } else {
-            seatsRemaining = randomInt(4, 15);
-            status = 'available';
+            flightCount++;
           }
-
-          // Stops: ~85% nonstop, ~15% 1 stop
-          const stops = seededRandom() < 0.85 ? 0 : 1;
-          const actualDuration = stops === 1 ? route.duration + randomInt(40, 90) : route.duration;
-
-          // Deterministic ID
-          const id = `${origin}-${route.dest}-${flightNum.replace(' ', '')}-${depTime}`;
-
-          upsertFlight.run(
-            id,
-            origin,
-            route.dest,
-            depTime,
-            arrTime,
-            flightNum,
-            price,
-            isGoWild,
-            seatsRemaining,
-            actualDuration,
-            stops,
-            status,
-            expiresAt,
-          );
-
-          flightCount++;
         }
       }
     }
+  });
+
+  seedFlights();
+
+  const totalFlights = db.prepare('SELECT COUNT(*) as count FROM flight_cache').get() as { count: number };
+  console.log(`[Seed] Seeded ${flightCount} flights across ${Object.keys(ROUTES).length} origins over ${DAYS_AHEAD} days.`);
+  console.log(`[Seed] Total flights in cache: ${totalFlights.count}`);
+}
+
+/**
+ * Check if the database needs seeding (flight_cache is empty).
+ * Called at server startup.
+ */
+export function seedIfEmpty(): void {
+  const row = db.prepare('SELECT COUNT(*) as count FROM flight_cache').get() as { count: number };
+  if (row.count === 0) {
+    console.log('[Seed] No flights found in cache — auto-seeding...');
+    seedDatabase();
+  } else {
+    console.log(`[Seed] Flight cache has ${row.count} entries, skipping seed.`);
   }
-});
+}
 
-seedFlights();
-console.log(`Seeded ${flightCount} flights across ${Object.keys(ROUTES).length} origins over ${DAYS_AHEAD} days.`);
+// ─── Standalone Execution ───────────────────────────────────────────────────
+// When run directly via: npm run db:seed
 
-// ─── Summary ────────────────────────────────────────────────────────────────
+const isMain = process.argv[1]?.endsWith('seed.ts') || process.argv[1]?.endsWith('seed.js');
+if (isMain) {
+  // When running standalone, load dotenv and ensure schema + data dir
+  const { mkdirSync } = await import('fs');
+  const { dirname } = await import('path');
+  const { initSchema } = await import('./db.js');
 
-const totalFlights = db.prepare('SELECT COUNT(*) as count FROM flight_cache').get() as { count: number };
-const totalAirports = db.prepare('SELECT COUNT(*) as count FROM monitored_airports').get() as { count: number };
-const origins = db.prepare('SELECT DISTINCT origin FROM flight_cache').all() as { origin: string }[];
-const destinations = db.prepare('SELECT COUNT(DISTINCT destination) as count FROM flight_cache').get() as { count: number };
+  const dbPath = process.env.DATABASE_PATH || './data/passpilot.db';
+  mkdirSync(dirname(dbPath), { recursive: true });
+  initSchema();
 
-console.log('\n--- Seed Summary ---');
-console.log(`Total flights in cache: ${totalFlights.count}`);
-console.log(`Monitored airports: ${totalAirports.count}`);
-console.log(`Origins: ${origins.map(o => o.origin).join(', ')}`);
-console.log(`Unique destinations: ${destinations.count}`);
-console.log(`Expires at: ${expiresAt}`);
-console.log('Seed complete!');
+  seedDatabase();
+
+  const origins = db.prepare('SELECT DISTINCT origin FROM flight_cache').all() as { origin: string }[];
+  const destinations = db.prepare('SELECT COUNT(DISTINCT destination) as count FROM flight_cache').get() as { count: number };
+  const airports = db.prepare('SELECT COUNT(*) as count FROM monitored_airports').get() as { count: number };
+  console.log(`\nOrigins: ${origins.map(o => o.origin).join(', ')}`);
+  console.log(`Unique destinations: ${destinations.count}`);
+  console.log(`Monitored airports: ${airports.count}`);
+  console.log('Seed complete!');
+}

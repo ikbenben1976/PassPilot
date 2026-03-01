@@ -4,6 +4,7 @@ import cors from 'cors';
 import { createServer } from 'http';
 
 import { initSchema } from './lib/db.js';
+import { seedIfEmpty } from './lib/seed.js';
 import { requireAuth } from './middleware/auth.js';
 import { optionalAuth } from './middleware/auth.js';
 import { requireSubscription } from './middleware/subscription.js';
@@ -25,6 +26,9 @@ import { getAllAirports, searchAirports } from './lib/airports.js';
 
 initSchema();
 console.log('[DB] Schema initialized');
+
+// Auto-seed flight data if the cache is empty (no manual step needed)
+seedIfEmpty();
 
 // ─── Express App ─────────────────────────────────────────────────────────────
 
